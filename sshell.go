@@ -3,6 +3,7 @@ package sshell
 import (
 	"crypto/subtle"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -13,9 +14,17 @@ import (
 
 	"golang.org/x/crypto/ssh/terminal"
 
+	"github.com/awgh/sshell/commands"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
+
+func init() {
+	commands.RegisterCommand("test", cmdTest, nil)
+	commands.RegisterCommand("exit", cmdExit, nil)
+}
+
+var errExitApp = errors.New("exiting")
 
 // SSHell settings struct
 type SSHell struct {
@@ -23,17 +32,11 @@ type SSHell struct {
 	Port           int
 	Running        bool
 	Prompt         string
-
-	Commands map[string]command
 }
 
 // NewSSHell - create a SSHell with default settings
 func NewSSHell() *SSHell {
 	s := new(SSHell)
-	s.Commands = map[string]command{
-		"test": command{run: cmdTest},
-		"exit": command{run: cmdExit},
-	}
 	return s
 }
 
@@ -132,11 +135,6 @@ func (s *SSHell) handleChannel(newChannel ssh.NewChannel) {
 	}
 }
 
-// WriteTerm - writes message to terminal
-func WriteTerm(term io.Writer, msg string) {
-	term.Write([]byte(msg + "\n"))
-}
-
 func (s *SSHell) serveTerminal(connection ssh.Channel, oldrequests <-chan *ssh.Request) {
 
 	term := terminal.NewTerminal(connection, s.Prompt)
@@ -168,14 +166,14 @@ func (s *SSHell) serveTerminal(connection ssh.Channel, oldrequests <-chan *ssh.R
 			continue
 		}
 		cmd, args := f[0], f[1:]
-		if _, c, ok := s.lookupCommand(cmd); ok {
-			err = c.run(term, args)
+		if _, c, ok := commands.LookupCommand(cmd); ok {
+			err = c.Run(term, args)
 			if err == errExitApp {
-				WriteTerm(term, "Exiting.")
+				term.Write([]byte("Exiting." + "\n"))
 				return
 			}
 		} else {
-			WriteTerm(term, "Unknown command: "+line)
+			term.Write([]byte("Unknown command: " + line + "\n"))
 		}
 	}
 }
@@ -207,14 +205,14 @@ func (s *SSHell) autoCompleteCallback(line string, pos int, key rune) (newLine s
 	// Auto-complete for the command itself.
 	if !strings.Contains(line, " ") {
 		var name string
-		name, _, ok = s.lookupCommand(line)
+		name, _, ok = commands.LookupCommand(line)
 		if !ok {
 			return
 		}
 		return name, len(name), true
 	}
-	_, c, ok := s.lookupCommand(line[:strings.IndexByte(line, ' ')])
-	if !ok || c.complete == nil {
+	_, c, ok := commands.LookupCommand(line[:strings.IndexByte(line, ' ')])
+	if !ok || c.Complete == nil {
 		return
 	}
 	if strings.HasSuffix(line, " ") {
@@ -226,7 +224,7 @@ func (s *SSHell) autoCompleteCallback(line string, pos int, key rune) (newLine s
 	}
 	soFar := m[1]
 	var match []string
-	for _, cand := range c.complete() {
+	for _, cand := range c.Complete() {
 		if len(soFar) > len(cand) || !strings.EqualFold(cand[:len(soFar)], soFar) {
 			continue
 		}
@@ -242,21 +240,14 @@ func (s *SSHell) autoCompleteCallback(line string, pos int, key rune) (newLine s
 	return newLine, len(newLine), true
 }
 
-func (s *SSHell) lookupCommand(prefix string) (name string, c command, ok bool) {
-	prefix = strings.ToLower(prefix)
-	if c, ok = s.Commands[prefix]; ok {
-		return prefix, c, ok
-	}
-	for full, candidate := range s.Commands {
-		if strings.HasPrefix(full, prefix) {
-			if c.run != nil {
-				return "", command{}, false
-			}
-			c = candidate
-			name = full
-		}
-	}
-	return name, c, c.run != nil
+func cmdTest(term io.Writer, args []string) error {
+	msg := fmt.Sprintf("Test: %+v", args)
+	term.Write([]byte(msg + "\n"))
+	return nil
+}
+
+func cmdExit(term io.Writer, args []string) error {
+	return errExitApp
 }
 
 func parseDims(b []byte) (uint32, uint32) {
