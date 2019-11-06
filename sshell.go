@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -138,7 +137,7 @@ func (s *SSHell) handleChannel(newChannel ssh.NewChannel) {
 func (s *SSHell) serveTerminal(connection ssh.Channel, oldrequests <-chan *ssh.Request) {
 
 	term := terminal.NewTerminal(connection, s.Prompt)
-	term.AutoCompleteCallback = s.autoCompleteCallback
+	term.AutoCompleteCallback = commands.AutoCompleteCallback
 
 	go func() { // OOB requests
 		for req := range oldrequests {
@@ -195,49 +194,6 @@ func (s *SSHell) serveSFTP(channel ssh.Channel) {
 	} else if err != nil {
 		log.Fatal("sftp server completed with error:", err)
 	}
-}
-
-func (s *SSHell) autoCompleteCallback(line string, pos int, key rune) (newLine string, newPos int, ok bool) {
-	if key != '\t' || pos != len(line) {
-		return
-	}
-	lastWord := regexp.MustCompile(`.+\W(\w+)$`)
-	// Auto-complete for the command itself.
-	if !strings.Contains(line, " ") {
-		var name string
-		name, _, ok = commands.LookupCommand(line)
-		if !ok {
-			return
-		}
-		return name, len(name), true
-	}
-	_, c, ok := commands.LookupCommand(line[:strings.IndexByte(line, ' ')])
-	if !ok || c.Complete == nil {
-		return
-	}
-	if strings.HasSuffix(line, " ") {
-		return line, pos, true
-	}
-	m := lastWord.FindStringSubmatch(line)
-	if m == nil {
-		return line, len(line), true
-	}
-	soFar := m[1]
-	var match []string
-	for _, cand := range c.Complete() {
-		if len(soFar) > len(cand) || !strings.EqualFold(cand[:len(soFar)], soFar) {
-			continue
-		}
-		match = append(match, cand)
-	}
-	if len(match) == 0 {
-		return
-	}
-	if len(match) > 1 {
-		return line, pos, true
-	}
-	newLine = line[:len(line)-len(soFar)] + match[0]
-	return newLine, len(newLine), true
 }
 
 func cmdTest(term io.Writer, args []string) error {

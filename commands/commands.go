@@ -2,6 +2,7 @@ package commands
 
 import (
 	"io"
+	"regexp"
 	"strings"
 )
 
@@ -41,4 +42,48 @@ func LookupCommand(prefix string) (name string, c Command, ok bool) {
 		}
 	}
 	return name, c, c.Run != nil
+}
+
+// AutoCompleteCallback - Callback for AutoCompletioon of Commands
+func AutoCompleteCallback(line string, pos int, key rune) (newLine string, newPos int, ok bool) {
+	if key != '\t' || pos != len(line) {
+		return
+	}
+	lastWord := regexp.MustCompile(`.+\W(\w+)$`)
+	// Auto-complete for the command itself.
+	if !strings.Contains(line, " ") {
+		var name string
+		name, _, ok = LookupCommand(line)
+		if !ok {
+			return
+		}
+		return name, len(name), true
+	}
+	_, c, ok := LookupCommand(line[:strings.IndexByte(line, ' ')])
+	if !ok || c.Complete == nil {
+		return
+	}
+	if strings.HasSuffix(line, " ") {
+		return line, pos, true
+	}
+	m := lastWord.FindStringSubmatch(line)
+	if m == nil {
+		return line, len(line), true
+	}
+	soFar := m[1]
+	var match []string
+	for _, cand := range c.Complete() {
+		if len(soFar) > len(cand) || !strings.EqualFold(cand[:len(soFar)], soFar) {
+			continue
+		}
+		match = append(match, cand)
+	}
+	if len(match) == 0 {
+		return
+	}
+	if len(match) > 1 {
+		return line, pos, true
+	}
+	newLine = line[:len(line)-len(soFar)] + match[0]
+	return newLine, len(newLine), true
 }
