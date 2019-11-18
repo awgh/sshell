@@ -1,9 +1,13 @@
 package commands
 
 import (
+	"bytes"
+	"errors"
 	"io"
 	"regexp"
 	"strings"
+
+	"github.com/mattn/go-shellwords"
 )
 
 var (
@@ -86,4 +90,23 @@ func AutoCompleteCallback(line string, pos int, key rune) (newLine string, newPo
 	}
 	newLine = line[:len(line)-len(soFar)] + match[0]
 	return newLine, len(newLine), true
+}
+
+// Exec - execute a command line in the interpreter
+func Exec(args string) (string, error) {
+	f, err := shellwords.Parse(args)
+	if err != nil {
+		return err.Error(), err
+	}
+	if len(f) == 0 {
+		return "", nil
+	}
+	cmd, argv := f[0], f[1:]
+	b := new(bytes.Buffer)
+	if _, c, ok := LookupCommand(cmd); ok {
+		err = c.Run(b, argv)
+		return string(b.Bytes()), nil
+	}
+	t := "Unknown command: " + f[0] + "\n"
+	return t, errors.New(t)
 }
